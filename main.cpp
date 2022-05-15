@@ -4,24 +4,15 @@
 #include "hardware/pwm.h"
 #include "midi_data.h"
 
-/*
-    In case of build issues after copying the template, delete the entire build directory and in VSCode:
-    Restart VSCode, click on "Terminal" on the top bar, and select GCC 10.2.1 arm-none-eabi
-
-    Overclocking: https://youtu.be/G2BuoFNLoDM (The "catch" is already fixed in CMakeLists.txt, uncomment the three lines at the bottom)
-    PIO: https://youtu.be/JSis2NU65w8
-    Explaining PIO ASM instructions: https://youtu.be/yYnQYF_Xa8g
-
-    - Max X, 2022-01-07
-*/
+#define OUTPUT_PIN 17
 
 uint pwm_slice_num;
 
 struct repeating_timer timer;
 
 void setUpPWM() {
-    gpio_set_function(17, GPIO_FUNC_PWM);
-    pwm_slice_num = pwm_gpio_to_slice_num(17);
+    gpio_set_function(OUTPUT_PIN, GPIO_FUNC_PWM);
+    pwm_slice_num = pwm_gpio_to_slice_num(OUTPUT_PIN);
     pwm_set_wrap(pwm_slice_num, 1023);
     pwm_set_chan_level(pwm_slice_num, PWM_CHAN_B, 0);
     pwm_set_enabled(pwm_slice_num, true);
@@ -35,8 +26,23 @@ bool testf = 1;
 uint16_t sample_index = 0;
 uint16_t midi_index = 0;
 bool note_states[128];
+uint32_t previous_time = 0;
+
+void reset_midi() {
+    for (int i = 0; i < 128; i++) {
+        note_states[i] = false;
+    }
+    sample_index = 0;
+    midi_index = 0;
+    previous_time = to_ms_since_boot(get_absolute_time());
+}
 
 bool timer_isr(struct repeating_timer *t) {
+
+    if (midi_index >= midi_data_length - 1) {
+        reset_midi();
+    }
+
     gpio_put(16, testf);
     testf = 1 - testf;
 
@@ -48,13 +54,12 @@ bool timer_isr(struct repeating_timer *t) {
         7 bits to the left of that = the MIDI note affected
         the rest of the bits = absolute time in milliseconds of the event
 
-        bool action = value & (uint32_t 1 << 31);
-
+        e.g. bool action = value & (uint32_t 1 << 31);
     */
 
-    uint32_t millis = to_ms_since_boot(get_absolute_time());
+    uint32_t millis = to_ms_since_boot(get_absolute_time()) - previous_time;
     uint32_t midi_time = midi_data & 0x00FFFFFF;
-    uint32_t intermediate0 = midi_data & 0b01111111000000000000000000000000;
+    uint32_t intermediate0 = midi_data & 0x7F000000;
     uint8_t note = (uint8_t) (intermediate0 >> 24);
     
     if (millis >= midi_time) {
@@ -63,8 +68,8 @@ bool timer_isr(struct repeating_timer *t) {
         }
         else {
             note_states[note] = false;
-        }
-        midi_index++;
+        } 
+        midi_index++;  // please ensure midi index does not exceed midi array length
     }
 
     uint8_t pwm_output_value = 0;
@@ -104,7 +109,7 @@ int main() {
     gpio_init(25);
     gpio_set_dir(25, GPIO_OUT);
 
-    gpio_init(16);
+    gpio_init(16); // status updates (sort of, use an oscilloscope)
     gpio_set_dir(16, GPIO_OUT);
 
     setUpPWM();
