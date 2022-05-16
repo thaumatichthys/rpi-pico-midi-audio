@@ -38,14 +38,9 @@ void reset_midi() {
 }
 
 bool timer_isr(struct repeating_timer *t) {
-
     if (midi_index >= midi_data_length - 1) {
         reset_midi();
     }
-
-    gpio_put(16, testf);
-    testf = 1 - testf;
-
     uint32_t midi_data = midi_array[midi_index];
     
     /*
@@ -61,7 +56,6 @@ bool timer_isr(struct repeating_timer *t) {
     uint32_t midi_time = midi_data & 0x00FFFFFF;
     uint32_t intermediate0 = midi_data & 0x7F000000;
     uint8_t note = (uint8_t) (intermediate0 >> 24);
-    
     if (millis >= midi_time) {
         if (midi_data & ((uint32_t) 1 << 31)) {
             note_states[note] = true;
@@ -69,13 +63,12 @@ bool timer_isr(struct repeating_timer *t) {
         else {
             note_states[note] = false;
         } 
-        midi_index++;  // please ensure midi index does not exceed midi array length
+        midi_index++;
+        gpio_put(16, testf);
+        testf = 1 - testf;
     }
-
     uint8_t pwm_output_value = 0;
-
     int32_t average_table_val = 0;
-
     uint8_t number_of_notes = 0;
     for (uint16_t i = 0; i < 128; i++) {
         if (note_states[i]) {
@@ -83,16 +76,13 @@ bool timer_isr(struct repeating_timer *t) {
             number_of_notes++;
         }
     }
-
     average_table_val = (average_table_val - 128) / (number_of_notes + 1);
-    average_table_val /= 2.0f;
+    average_table_val /= 1.5f;
     average_table_val += 128;
-
     sample_index++;
     if (sample_index >= wave_table_length) {
         sample_index = 0;
     }
-
     changePWM(average_table_val);
     return true;
 }
