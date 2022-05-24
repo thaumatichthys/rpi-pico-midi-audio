@@ -13,13 +13,13 @@ struct repeating_timer timer;
 void setUpPWM() {
     gpio_set_function(OUTPUT_PIN, GPIO_FUNC_PWM);
     pwm_slice_num = pwm_gpio_to_slice_num(OUTPUT_PIN);
-    pwm_set_wrap(pwm_slice_num, 1023);
+    pwm_set_wrap(pwm_slice_num, 4095);
     pwm_set_chan_level(pwm_slice_num, PWM_CHAN_B, 0);
     pwm_set_enabled(pwm_slice_num, true);
 }
 
 void changePWM(uint8_t dutyCycle) {
-    pwm_set_chan_level(pwm_slice_num, PWM_CHAN_B, 4 * dutyCycle);
+    pwm_set_chan_level(pwm_slice_num, PWM_CHAN_B, 16 * dutyCycle);
 }
 bool testf = 1;
 
@@ -27,6 +27,7 @@ uint16_t sample_index = 0;
 uint16_t midi_index = 0;
 bool note_states[128];
 uint32_t previous_time = 0;
+uint32_t note_starts[128];
 
 void reset_midi() {
     for (int i = 0; i < 128; i++) {
@@ -37,12 +38,17 @@ void reset_midi() {
     previous_time = to_ms_since_boot(get_absolute_time());
 }
 
+uint8_t note_decay(uint32_t elapsed_time, uint8_t value) {
+    uint16_t decay_factor = 250;
+    return ((((uint32_t)1000 * decay_factor) / (elapsed_time + decay_factor)) * value) / 1000;
+}
+
 bool timer_isr(struct repeating_timer *t) {
     if (midi_index >= midi_data_length - 1) {
         reset_midi();
     }
     uint32_t midi_data = midi_array[midi_index];
-    
+
     /*
         MIDI text format:
         MSB = note on/off
@@ -59,6 +65,7 @@ bool timer_isr(struct repeating_timer *t) {
     if (millis >= midi_time) {
         if (midi_data & ((uint32_t) 1 << 31)) {
             note_states[note] = true;
+            note_starts[note] = millis;
         }
         else {
             note_states[note] = false;
@@ -72,7 +79,8 @@ bool timer_isr(struct repeating_timer *t) {
     uint8_t number_of_notes = 0;
     for (uint16_t i = 0; i < 128; i++) {
         if (note_states[i]) {
-            average_table_val += wave_table[i][sample_index];
+            uint32_t time_since_start = millis - note_starts[i];
+            average_table_val += note_decay(time_since_start, wave_table[i][sample_index]);
             number_of_notes++;
         }
     }
